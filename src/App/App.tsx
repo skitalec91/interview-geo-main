@@ -1,17 +1,16 @@
-import { useEffect, useState, useCallback, useRef, ChangeEventHandler } from 'react';
-import {
-  Checkbox,
-  FormControlLabel,
-  TextField,
-  Button,
-  IconButton,
-  Container,
-  Stack,
-  Autocomplete,
-  Box,
-  Typography,
-  CircularProgress
-} from '@mui/material';
+import { useEffect, useState, useCallback, ChangeEventHandler } from 'react';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import TextField from '@mui/material/TextField';
+import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Container from '@mui/material/Container';
+import Stack from '@mui/material/Stack';
+import Autocomplete from '@mui/material/Autocomplete';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import CircularProgress from '@mui/material/CircularProgress';
+
 import NavigationIcon from '@mui/icons-material/Navigation';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 
@@ -24,18 +23,14 @@ const LOCAL_DETECTED_CITY_KEY = 'cached_detected_city';
 function App() {
   const [value, setValue] = useState<OptionType | null>(null);
   const [inputValue, setInputValue] = useState('');
-  const [options, setOptions] = useState<readonly OptionType[]>([]);
   const [isAuto, setIsAuto] = useState<boolean>(true);
 
   const [isLocationLoading, setIsLocationLoading] = useState(false);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
-
-  const allCitiesRef = useRef<City[]>([]);
-  const [isCitiesLoaded, setIsCitiesLoaded] = useState(false);
+  const [options, setOptions] = useState<readonly OptionType[]>([]);
 
   const loadDefaultCity = useCallback((signal?: AbortSignal) => {
     const cachedDetectedCityStr = localStorage.getItem(LOCAL_DETECTED_CITY_KEY);
-    
     if (cachedDetectedCityStr) {
       try {
         const cachedCity: OptionType = JSON.parse(cachedDetectedCityStr);
@@ -104,7 +99,6 @@ function App() {
       setIsAuto(checked);
 
       if (checked) {
-        setOptions([]);
         loadDefaultCity();
       }
     },
@@ -121,84 +115,75 @@ function App() {
       .then(() => alert('Настройки успешно сохранены!'));
   }, [value]);
 
-  const initUser = useCallback(
-    async (signal: AbortSignal) => {
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const initUser = async () => {
+      await Promise.resolve();
+      if (controller.signal.aborted) return;
+
       try {
-        const response = await fetch('/api/user/1', { signal });
+        const response = await fetch('/api/user/1', { signal: controller.signal });
         const user: { id: number; currentCityId: number | null } = await response.json();
 
         if (user.currentCityId) {
-          const cityRes = await fetch(`/api/city/${user.currentCityId}`, { signal });
+          const cityRes = await fetch(`/api/city/${user.currentCityId}`, {
+            signal: controller.signal
+          });
           if (cityRes.ok) {
             const city: City = await cityRes.json();
             setValue({ id: city.id, label: city.name });
             return;
           }
         }
-        loadDefaultCity(signal);
+        loadDefaultCity(controller.signal);
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
-          loadDefaultCity(signal);
+          loadDefaultCity(controller.signal);
         }
       }
-    },
-    [loadDefaultCity]
-  );
+    };
 
-  useEffect(() => {
-    const controller = new AbortController();
-    initUser(controller.signal);
+    initUser();
 
     return () => {
       controller.abort();
     };
-  }, [initUser]);
+  }, [loadDefaultCity]);
 
   useEffect(() => {
-    if (isAuto || isCitiesLoaded) return;
-
-    const controller = new AbortController();
-    setIsSearchLoading(true);
-
-    fetchCities(
-      { signal: controller.signal },
-      (cities) => {
-        allCitiesRef.current = cities;
-        setIsCitiesLoaded(true);
+    if (isAuto || !inputValue.trim()) {
+      Promise.try(() => {
+        setOptions([]);
         setIsSearchLoading(false);
-      },
-      (error) => {
-        if ((error as Error).name !== 'AbortError') {
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const timerId = setTimeout(() => {
+      setIsSearchLoading(true);
+
+      fetchCities(
+        { prefix: inputValue.trim(), limit: 10, signal: controller.signal },
+        (cities) => {
+          setOptions(cities.map((city) => ({ id: city.id, label: city.name })));
           setIsSearchLoading(false);
+        },
+        (error) => {
+          if ((error as Error).name !== 'AbortError') {
+            setIsSearchLoading(false);
+          }
         }
-      }
-    );
+      );
+    }, 300);
 
     return () => {
+      clearTimeout(timerId);
       controller.abort();
     };
-  }, [isAuto, isCitiesLoaded]);
-
-  useEffect(() => {
-    if (isAuto) {
-      setOptions([]);
-      return;
-    }
-
-    if (!inputValue.trim()) {
-      setOptions(
-        allCitiesRef.current.slice(0, 10).map((city) => ({ id: city.id, label: city.name }))
-      );
-      return;
-    }
-
-    const lowerQuery = inputValue.toLowerCase().trim();
-    const filtered = allCitiesRef.current
-      .filter((city) => city.name.toLowerCase().startsWith(lowerQuery))
-      .slice(0, 10);
-
-    setOptions(filtered.map((city) => ({ id: city.id, label: city.name })));
-  }, [inputValue, isAuto, isCitiesLoaded]);
+  }, [inputValue, isAuto]);
 
   return (
     <div className="App">
